@@ -12,9 +12,10 @@ coreKtxVersion = "1.15.0"
 googleApiClientAndroidVersion = "1.34.0"
 googleApiServicesSheetsVersion = "v4-rev305-1.25.0"
 googleHttpClientGsonVersion = "1.42.3"
+googleOauthClientAndroid = "1.31.5"
 googleOauthClientAndroidVersion = "1.34.0"
 gsonVersion = "2.10.1"
-kotlinVersion = "2.0.0"
+kotlinVersion = "2.1.0"
 junitVersion = "4.13.2"
 androidxJunitVersion = "1.2.1"
 espressoCoreVersion = "3.6.1"
@@ -24,8 +25,18 @@ composeCompiler = "1.5.1"
 playServicesAuthVersion = "21.3.0"
 runtimeLivedataVersion = "1.7.7"
 coroutinesVersion = "1.6.4"
+android-gradle = "8.2.2"
+kotlin = "1.9.21"
+supportAnnotations = "28.0.0"
+credentials = "1.3.0"
+googleid = "1.1.1"
+core = "1.12.0"
+espressoCore = "3.5.1"
+imageLabelingDefaultCommon = "17.0.0"
+imageLabelingCommon = "18.1.0"
 
 [libraries]
+google-oauth-client-android-v1315 = { module = "com.google.oauth-client:google-oauth-client-android", version.ref = "googleOauthClientAndroid" }
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlinVersion" }
 kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutinesVersion" }
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
@@ -47,6 +58,18 @@ gson = { module = "com.google.code.gson:gson", version.ref = "gsonVersion" }
 junit = { module = "junit:junit", version.ref = "junitVersion" }
 androidx-junit = { module = "androidx.test.ext:junit", version.ref = "androidxJunitVersion" }
 androidx-espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espressoCoreVersion" }
+support-annotations = { group = "com.android.support", name = "support-annotations", version.ref = "supportAnnotations" }
+androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
+googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
+androidx-core = { group = "androidx.core", name = "core", version.ref = "core" }
+espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+image-labeling-default-common = { group = "com.google.mlkit", name = "image-labeling-default-common", version.ref = "imageLabelingDefaultCommon" }
+image-labeling-common = { group = "com.google.mlkit", name = "image-labeling-common", version.ref = "imageLabelingCommon" }
 
 [bundles]
 androidx-camera = ["androidx-camera-camera2", "androidx-camera-core", "androidx-camera-lifecycle", "androidx-camera-view"]
+
+[plugins]
+android-application = { id = "com.android.application", version = "8.2.2" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version = "1.9.21" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version = "1.9.21" }

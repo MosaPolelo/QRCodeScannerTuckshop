@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">QRCodeScannerTuckshop</string>
+    <string name="default_web_client_id">472779055824-evk8h1hmmrgfubgq7nnvk8int0d6vlfv.apps.googleusercontent.com</string>
+    <string name="app_logo">App logo</string>
 </resources>
