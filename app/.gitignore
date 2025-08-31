@@ -1,1 +1,4 @@
 /build
+# Ignore service account keys and config secrets
+app/src/main/*.json
+google-services.json
