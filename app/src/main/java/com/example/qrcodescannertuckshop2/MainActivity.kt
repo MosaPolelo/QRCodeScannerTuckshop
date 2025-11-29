@@ -4,6 +4,10 @@ package com.example.qrcodescannertuckshop2
 
 // ML Kit for barcode scanning
 
+// KEEP these:
+
+
+//import androidx.webkit.ProfileStore
 import android.Manifest
 import android.content.Context
 import android.content.pm.ActivityInfo
@@ -70,13 +74,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ListAlt
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Calculate
-import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -84,9 +91,16 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MaterialTheme.typography
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -97,9 +111,11 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -108,6 +124,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -116,12 +133,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -131,16 +150,21 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.credentials.Credential
 import androidx.credentials.CredentialManager
-import androidx.credentials.CredentialOption
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
-import androidx.credentials.GetCustomCredentialOption
-import androidx.credentials.exceptions.GetCredentialException
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import coil.compose.rememberAsyncImagePainter
 import com.example.qrcodescannertuckshop.ui.theme.QRCodeScannerTuckshopTheme
+import com.example.qrcodescannertuckshop2.auth.UserManager
+import com.example.qrcodescannertuckshop2.data.local.AppDb
+import com.example.qrcodescannertuckshop2.data.local.LocalUserRepository
+import com.example.qrcodescannertuckshop2.data.local.ProfileStore
+import com.example.qrcodescannertuckshop2.data.local.UserEntity
+import com.example.qrcodescannertuckshop2.data.local.UserRepository
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.json.JsonFactory
@@ -149,6 +173,12 @@ import com.google.api.services.sheets.v4.Sheets
 import com.google.api.services.sheets.v4.model.ValueRange
 import com.google.auth.http.HttpCredentialsAdapter
 import com.google.auth.oauth2.ServiceAccountCredentials
+import com.google.firebase.Firebase
+import com.google.firebase.auth.AuthResult
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.auth
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
@@ -175,9 +205,20 @@ import kotlin.math.abs
 import kotlin.random.Random
 
 
+enum class UserRole { ADMIN, CASHIER }
+
+data class AppUser(
+    val uid: String,
+    val username: String,
+    val role: UserRole,
+    val photoPath: String? = null
+)
+
+
 private const val CAMERA_PERMISSION_REQUEST_CODE = 101
 
 
+var currentUserRole: UserRole? = null
 
 
 suspend fun extractTextFromImage(imagePath: String): String? {
@@ -226,58 +267,6 @@ class BarcodeAnalyzer(
     }
 }
 
-@Composable
-fun SalesScanner(
-    onBarcodeScanned: (String) -> Unit
-) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val previewView = remember { PreviewView(context) }
-
-    AndroidView(
-        factory = {
-            previewView.apply {
-                scaleType = PreviewView.ScaleType.FILL_CENTER
-            }
-        },
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(200.dp)
-    )
-
-    LaunchedEffect(Unit) {
-        val cameraProvider = ProcessCameraProvider.getInstance(context).get()
-        val preview = Preview.Builder().build().also {
-            it.setSurfaceProvider(previewView.surfaceProvider)
-        }
-
-        val analyzer = BarcodeAnalyzer { barcode ->
-            onBarcodeScanned(barcode)
-        }
-
-        val imageAnalyzer = ImageAnalysis.Builder()
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
-            .also {
-                it.setAnalyzer(ContextCompat.getMainExecutor(context), analyzer)
-            }
-
-        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-        try {
-            cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(
-                lifecycleOwner,
-                cameraSelector,
-                preview,
-                imageAnalyzer
-            )
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-}
-
 
 @Composable
 fun FadeInImage(
@@ -302,13 +291,199 @@ fun FadeInImage(
 }
 
 
+@kotlin.OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TuckshopTopBar(
+    title: String,
+    showBack: Boolean = false,
+    onBack: () -> Unit = {},
+    onSwitchAccount: () -> Unit = {},
+    onTakeProfilePhoto: () -> Unit = {},
+    onSignOut: () -> Unit = {},
+    onAvatarClick: () -> Unit = {},
+    avatarPath: String? = null
+) {
+    val fbUser by UserManager.currentUser.collectAsState()
+    val ctx = LocalContext.current
+    val localPhotoPath by UserManager.localPhotoPath.collectAsState()
+
+    val savedName by ProfileStore.nameFlow(ctx).collectAsState(initial = null)
+    val savedRole by ProfileStore.roleFlow(ctx).collectAsState(initial = null)
+    val savedPhoto by ProfileStore.photoPathFlow(ctx).collectAsState(initial = null)
+
+    var menuOpen by remember { mutableStateOf(false) }
+
+    // Prefer Firebase name, else persisted name, else email, else Guest
+    val name = fbUser?.displayName
+        ?: savedName
+        ?: fbUser?.email?.substringBefore('@')
+        ?: "Guest"
+
+    // Prefer persisted/local photo path, else Firebase photoUrl
+    val photoToShow: String? =
+        avatarPath
+            ?: localPhotoPath
+            ?: savedPhoto
+            ?: fbUser?.photoUrl?.toString()
+
+    TopAppBar(
+        title = { Text(title) },
+        navigationIcon = {
+            if (showBack) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                }
+            }
+        },
+        actions = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(end = 12.dp)
+            ) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+
+                IconButton(
+                    onClick = {
+                        onSwitchAccount()
+                        onAvatarClick()
+                        menuOpen = true
+                    }
+                ) {
+                    Icon(Icons.Filled.AccountCircle, contentDescription = "Account")
+                }
+
+                // Avatar (falls back to letter circle if no photo)
+                if (!photoToShow.isNullOrBlank()) {
+                    val model: Any =
+                        if (photoToShow.startsWith("/")) File(photoToShow) else photoToShow
+
+                    Image(
+                        painter = rememberAsyncImagePainter(model),
+                        contentDescription = "Profile",
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Surface(
+                        modifier = Modifier.size(28.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = name.firstOrNull()?.uppercase() ?: "G",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+                }
+
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Menu")
+                }
+
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Switch account") },
+                        onClick = {
+                            menuOpen = false
+                            onSwitchAccount()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Take profile photo") },
+                        onClick = {
+                            menuOpen = false
+                            onTakeProfilePhoto()
+                        }
+                    )
+                    Divider()
+                    DropdownMenuItem(
+                        text = { Text("Sign out") },
+                        onClick = {
+                            menuOpen = false
+                            onSignOut()
+                        }
+                    )
+                }
+            }
+        }
+    )
+}
+
+
+@Composable
+fun ProfilePhotoDialog(
+    onDismiss: () -> Unit,
+    onBitmapReady: (android.graphics.Bitmap) -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Camera capture (thumbnail)
+    val takePhotoLauncher =
+        androidx.activity.compose.rememberLauncherForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.TakePicturePreview()
+        ) { bmp: android.graphics.Bitmap? ->
+            if (bmp != null) onBitmapReady(bmp)
+            onDismiss()
+        }
+
+    // Gallery picker
+    val pickImageLauncher =
+        androidx.activity.compose.rememberLauncherForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.GetContent()
+        ) { uri: android.net.Uri? ->
+            if (uri != null) {
+                val bmp = runCatching {
+                    context.contentResolver.openInputStream(uri)?.use {
+                        android.graphics.BitmapFactory.decodeStream(it)
+                    }
+                }.getOrNull()
+                if (bmp != null) onBitmapReady(bmp)
+            }
+            onDismiss()
+        }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        androidx.compose.material3.Surface(shape = androidx.compose.material3.MaterialTheme.shapes.large) {
+            androidx.compose.foundation.layout.Column(
+                modifier = androidx.compose.ui.Modifier.padding(24.dp)
+            ) {
+                androidx.compose.material3.Text(
+                    text = "Update profile photo",
+                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium
+                )
+                androidx.compose.foundation.layout.Spacer(Modifier.height(12.dp))
+                androidx.compose.material3.Button(onClick = { takePhotoLauncher.launch(null) }) {
+                    androidx.compose.material3.Text("Take photo")
+                }
+                androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+                androidx.compose.material3.Button(onClick = { pickImageLauncher.launch("image/*") }) {
+                    androidx.compose.material3.Text("Choose from gallery")
+                }
+                androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+                androidx.compose.material3.TextButton(onClick = onDismiss) {
+                    androidx.compose.material3.Text("Cancel")
+                }
+            }
+        }
+    }
+}
+
+
 class MainActivity : ComponentActivity() {
    // private lateinit var signInClient: SignInClient
     private lateinit var credential: GoogleAccountCredential
     private lateinit var sheetsService: Sheets
     private lateinit var credentialManager: CredentialManager
-
-
+    private var signInTried = false
+    private var chooserShown = false
 
 
 
@@ -352,11 +527,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {                      // NEW
+        super.onStart()
+        initializeGoogleSignIn()                  // one-shot guarded by signInTried
+    }
+
 
     private lateinit var requestPermissionLauncher: ActivityResultLauncher<String>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        UserManager.start()
+        initializeGoogleSignIn()
 
         val isTablet = resources.getBoolean(R.bool.isTablet)
         if (!isTablet) {
@@ -374,14 +557,43 @@ class MainActivity : ComponentActivity() {
         }
 
         val service: Sheets? = getSheetsService(context = this)
+        var currentUser: AppUser? = null
 
         setContent {
             QRCodeScannerTuckshopTheme {
+
+                val fbUser: FirebaseUser? by UserManager.currentUser.collectAsState(initial = null)
+
+                var currentScreen by remember {
+                    mutableStateOf(
+                        if (fbUser != null) Routes.POS_MENU else Routes.LOGIN
+                    )
+                }
+
+                LaunchedEffect(fbUser) {
+                    currentScreen = if (fbUser != null) Routes.POS_MENU else Routes.LOGIN
+                }
+
+                val service: Sheets? = getSheetsService(context = this)
+
                 service?.let { sheetsService ->
-                    AppNavigator(service = sheetsService, onExitApp = { finish() })
+                    AppNavigator(
+                        service = sheetsService,
+                        onExitApp = { finish() },
+
+                        currentScreen = currentScreen,
+                        setCurrentScreen = { screen -> currentScreen = screen },
+
+                        currentUser = fbUser, // just for routing/navigation
+                        setCurrentUser = {},  // FirebaseUser is not manually set, so skip this
+                        launchAccountChooser = { launchAccountChooser() }
+                    )
                 }
             }
         }
+
+
+
 
         initializeGoogleSignIn()
         credentialManager = CredentialManager.create(this)
@@ -389,42 +601,142 @@ class MainActivity : ComponentActivity() {
 
 
     fun initializeGoogleSignIn() {
-        val credentialManager: CredentialManager = CredentialManager.create(this)
+        if (signInTried) return
+        signInTried = true
 
-        // Define the request with Public Key Credentials
-        val request: GetCredentialRequest = GetCredentialRequest.Builder()
-            .addCredentialOption(
-                getCustomCredentialOption(getString(R.string.default_web_client_id))
-            )
+        val credentialManager = CredentialManager.create(this)
+
+        // Try silent sign-in first
+        val silentOption = GetSignInWithGoogleOption.Builder(
+            getString(R.string.default_web_client_id) // from strings.xml (wired by google-services.json)
+        ).build()
+
+        val silentReq = GetCredentialRequest.Builder()
+            .addCredentialOption(silentOption)
             .build()
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val response: GetCredentialResponse = credentialManager.getCredential(
-                    request = request,
+                val resp: GetCredentialResponse = credentialManager.getCredential(
+                    request = silentReq,
                     context = this@MainActivity
                 )
+                handleCredentialResponse(resp)
+                return@launch
+            } catch (_: Exception) {
+                // no cached account or multiple accounts -> fall back to chooser
+            }
 
-                val credential: Credential = response.credential
+            // 2) One-shot chooser (guarded)
+            if (chooserShown) return@launch       // NEW
+            chooserShown = true                   // NEW
 
-                // Check if the credential is a CustomCredential
-                if (credential is CustomCredential) {
-                    val idToken: String? = credential.data.getString("id_token")
-                    if (!idToken.isNullOrEmpty()) {
-                        withContext(Dispatchers.Main) {
-                            handleSignInResult(idToken)
-                        }
-                    } else {
-                        Log.e("GoogleSignIn", "ID Token is null")
-                    }
-                } else {
-                    Log.e("GoogleSignIn", "Received an unsupported credential type")
-                }
-            } catch (e: GetCredentialException) {
-                Log.e("GoogleSignIn", "Sign-in failed", e)
+            // Show account chooser
+            try {
+                val chooserOption = GetSignInWithGoogleOption.Builder(
+                    getString(R.string.default_web_client_id)
+                ).build()
+
+                val chooserReq = GetCredentialRequest.Builder()
+                    .addCredentialOption(chooserOption)
+                    .build()
+
+                val resp2: GetCredentialResponse = credentialManager.getCredential(
+                    request = chooserReq,
+                    context = this@MainActivity
+                )
+                handleCredentialResponse(resp2)
+            } catch (_: Exception) {
+                // user cancelled or no Google account available (optional: toast/snackbar)
             }
         }
     }
+
+    private fun launchAccountChooser() {
+        val credentialManager = CredentialManager.create(this)
+        val option = GetSignInWithGoogleOption.Builder(getString(R.string.default_web_client_id))
+            .build() // no setAutoSelectEnabled
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(option)
+            .build()
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val resp = credentialManager.getCredential(
+                    request = request,
+                    context = this@MainActivity
+                )
+                handleCredentialResponse(resp) // your existing helper
+            } catch (_: Exception) {
+                // user cancelled / no account — optional toast/snackbar on Main
+            }
+        }
+    }
+
+
+
+
+    // Extract ID token and sign into Firebase so UI can show the real name/photo
+    private suspend fun firebaseSignInWithIdToken(idToken: String) {
+        val credential = GoogleAuthProvider.getCredential(idToken, null)
+        FirebaseAuth.getInstance().signInWithCredential(credential).addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                // Update the user shown in the TopBar
+                // UserManager listens to FirebaseAuth already; no extra call needed
+                Log.d("GoogleSignIn", "Firebase sign-in success")
+            } else {
+                Log.e("GoogleSignIn", "Firebase sign-in error: ${task.exception?.message}")
+            }
+        }
+    }
+
+    private suspend fun handleGoogleIdToken(cred: Credential) {
+        val googleIdCred = GoogleIdTokenCredential.createFrom(cred.data)
+        val idToken = googleIdCred.idToken
+        withContext(Dispatchers.Main) {
+            firebaseSignInWithIdToken(idToken)
+        }
+    }
+
+    private suspend fun handleCredentialResponse(resp: GetCredentialResponse) {
+        val cred: Credential = resp.credential
+        if (cred is CustomCredential &&
+            cred.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+        ) {
+            val googleCred = GoogleIdTokenCredential.createFrom(cred.data)
+            val idToken: String = googleCred.idToken
+
+            val auth = FirebaseAuth.getInstance()
+            val firebaseCred = GoogleAuthProvider.getCredential(idToken, null)
+
+            val result: AuthResult = auth.signInWithCredential(firebaseCred).await()
+            val fbUser: FirebaseUser? = result.user
+
+            withContext(Dispatchers.Main) {
+                // Update UI state via UserManager
+                UserManager.onGoogleSignIn(fbUser)
+            }
+
+            // Persist a default profile for Settings + TopBar
+            val friendly: String = fbUser?.displayName
+                ?: fbUser?.email?.substringBefore('@')
+                ?: "User"
+
+            withContext(Dispatchers.IO) {
+                if (fbUser != null) {
+                    ProfileStore.saveActive(
+                        ctx = this@MainActivity,
+                        name = friendly,
+                        role = "CASHIER" ,
+                        photoPath = fbUser.photoUrl?.toString()// default; you'll change when ManageUsers picks a role
+                    )
+                }
+            }
+        } else {
+            Log.w("GoogleSignIn", "Unsupported credential type: ${cred::class.java}")
+        }
+    }
+
 
 
     fun checkAndRequestCameraPermission() {
@@ -447,26 +759,32 @@ class MainActivity : ComponentActivity() {
     }
 
 
-    private fun getCustomCredentialOption(clientId: String): CredentialOption {
-        val extras: Bundle = Bundle().apply {
-            putString("client_id", clientId)
-            putString("nonce", "random_nonce_value") // Replace with actual nonce
-        }
-
-        return GetCustomCredentialOption(
-            type = "public_key",
-            requestData = extras,
-            candidateQueryData = extras,  // This may be required for some API versions
-            isSystemProviderRequired = false
-        )
-    }
-
-
     private fun handleSignInResult(idToken: String) {
         Log.d("GoogleSignIn", "Sign-In Successful: $idToken")
-        credential = GoogleAccountCredential.usingOAuth2(this, listOf("https://www.googleapis.com/auth/spreadsheets"))
+
+        // ✅ 2a. Sign in to Firebase so we can get displayName/photo/email
+        val firebaseCred = com.google.firebase.auth.GoogleAuthProvider.getCredential(idToken, null)
+        com.google.firebase.auth.FirebaseAuth.getInstance()
+            .signInWithCredential(firebaseCred)
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    val user = task.result?.user
+                    if (user != null) {
+                        // ✅ 2b. Publish to our app-wide state
+                        UserManager.onGoogleSignIn(user)
+                    }
+                } else {
+                    Log.e("GoogleSignIn", "Firebase sign-in failed", task.exception)
+                }
+            }
+
+        // ✅ 2c. Keep your Google Sheets stuff as you had it
+        credential = GoogleAccountCredential.usingOAuth2(
+            this, listOf("https://www.googleapis.com/auth/spreadsheets")
+        )
         initializeSheetsService()
     }
+
 
     private fun initializeSheetsService() {
         val transport = NetHttpTransport()
@@ -527,33 +845,8 @@ fun writeToGoogleSheets(
     }
 }
 
-suspend fun readGoogleSheet(
-    sheetName: String,
-    service: Sheets
-): List<List<String>> {
-    return withContext(Dispatchers.IO) {
-        try {
-            val range = "Sheet1!A2:G" // Skip header row
-            val response = service.spreadsheets().values()
-                .get("1KNHlGEKC1Oz_wf7NT5w4XKVIqMiLIzrisHiVIUkz-nA", range)
-                .execute()
-
-            response.getValues()?.map { row ->
-                row.map { it.toString() }
-            } ?: emptyList()
-        } catch (e: Exception) {
-            Log.e("GoogleSheets", "❌ Failed to read from sheet: ${e.message}", e)
-            emptyList()
-        }
-    }
-}
-
 fun List<Any>.getOrNullSafe(index: Int): String? {
     return if (index in indices) this[index].toString() else null
-}
-
-fun String?.toIntSafe(): Int? {
-    return this?.toIntOrNull()
 }
 
 
@@ -852,15 +1145,245 @@ fun ScannerPreview(
     }
 }
 
+@Composable
+fun CaptureProfilePhotoScreen(
+    onBack: () -> Unit,
+    onPhotoSaved: () -> Unit,
+    currentUser: AppUser?
+) {
+    val ctx: Context = LocalContext.current
+    val coroutineScope: CoroutineScope = rememberCoroutineScope()
+
+    var previewBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    // Launcher for system camera preview
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bmp ->
+        if (bmp != null) {
+            val uidForSave = UserManager.currentUser.value?.uid
+                ?: "Local:${currentUser?.username ?: "unknown"}"
+
+            coroutineScope.launch {
+                val ok = UserManager.updatePhoto(ctx, uidForSave, bmp)
+                if (ok) {
+                    Toast.makeText(ctx, "Profile photo updated", Toast.LENGTH_SHORT).show()
+                    onPhotoSaved()
+                    onBack()
+                } else {
+                    Toast.makeText(ctx, "Couldn't update profile photo", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+    }
+
+    Scaffold(
+        topBar = {
+            TuckshopTopBar(
+                title = "Capture Profile Photo",
+                showBack = true,
+                onBack = onBack,
+                onTakeProfilePhoto = { cameraLauncher.launch(null) }, // top-right camera icon
+                onSignOut = {},
+                onSwitchAccount = {},
+                onAvatarClick = {}
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Button(onClick = { cameraLauncher.launch(null) }) {
+                Text("Take Profile Photo")
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            previewBitmap?.let { bmp ->
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = "Preview",
+                    modifier = Modifier
+                        .size(160.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+            }
+        }
+    }
+}
+
+
+@Composable
+fun AddUserScreen(
+    userRepo: UserRepository,
+    onBack: () -> Unit
+) {
+    val ctx: Context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var username by rememberSaveable { mutableStateOf("") }
+    var pin by rememberSaveable { mutableStateOf("") }
+
+    // IMPORTANT: must match enum names
+    var role by rememberSaveable { mutableStateOf("CASHIER") }   // default role
+
+    var showError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        Log.d("AddUserScreen", "Composable shown")
+    }
+
+    Scaffold(
+        topBar = {
+            TuckshopTopBar(
+                title = "Add User",
+                showBack = true,
+                onBack = onBack,
+                onSwitchAccount = {},
+                onTakeProfilePhoto = {},
+                onSignOut = {},
+                onAvatarClick = {}
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Top,
+            horizontalAlignment = Alignment.Start
+        ) {
+
+            Text("Create a new user", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(24.dp))
+
+            OutlinedTextField(
+                value = username,
+                onValueChange = { username = it },
+                label = { Text("Username") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = pin,
+                onValueChange = { pin = it.filter { ch -> ch.isDigit() }.take(6) },
+                label = { Text("PIN (4–6 digits)") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            // Role selector – now matches enum names
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Role: ", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.width(8.dp))
+
+                FilterChip(
+                    selected = role == "CASHIER",
+                    onClick = { role = "CASHIER" },
+                    label = { Text("CASHIER") },
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+
+                FilterChip(
+                    selected = role == "ADMIN",
+                    onClick = { role = "ADMIN" },
+                    label = { Text("ADMIN") }
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            Button(
+                onClick = {
+                    showError = null
+
+                    if (username.isBlank()) {
+                        showError = "Username cannot be empty"
+                        return@Button
+                    }
+                    if (pin.length < 4) {
+                        showError = "PIN must be at least 4 digits"
+                        return@Button
+                    }
+
+                    scope.launch {
+                        try {
+                            // Map String -> enum safely
+                            val roleEnum = when (role) {
+                                "ADMIN" -> UserRole.ADMIN
+                                "CASHIER" -> UserRole.CASHIER
+                                else -> UserRole.CASHIER
+                            }
+
+                            val result = userRepo.addUser(
+                                username = username,
+                                role = roleEnum,
+                                pin = pin,
+                                photoPath = null
+                            )
+
+                            if (result.isSuccess) {
+                                Toast.makeText(ctx, "User added", Toast.LENGTH_SHORT).show()
+                                onBack()
+                            } else {
+                                showError = result.exceptionOrNull()?.message
+                                    ?: "Failed to add user"
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            showError = "Failed to add user: ${e.message}"
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Save user")
+            }
+
+            if (showError != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = showError ?: "",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+
+
+
 
 
 
 @OptIn(ExperimentalGetImage::class)
-
-
 @Composable
-fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
-    var currentScreen: String by remember { mutableStateOf("Greeting") }
+fun AppNavigator(
+    service: Sheets,
+    onExitApp: () -> Unit,
+    currentScreen: String,
+    setCurrentScreen: (String) -> Unit,
+    currentUser: FirebaseUser?,
+    setCurrentUser: (AppUser?) -> Unit,
+    launchAccountChooser: () -> Unit
+) {
     var scannerSource by remember { mutableStateOf("Sales") }
     var savedImagePath by remember { mutableStateOf<String?>(null) }
     var productList by remember { mutableStateOf<List<Product>>(emptyList()) }
@@ -881,30 +1404,117 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
     var quantityInput: String by remember { mutableStateOf("") }
     var cartItemsState by remember { mutableStateOf<List<Product>>(emptyList()) }
     var cameraControl by remember { mutableStateOf<CameraControl?>(null) }
+    val cameraControlState = remember { mutableStateOf<CameraControl?>(null) }
+    // App user in-memory (must be var, not val)
+    var currentUser by remember { mutableStateOf<AppUser?>(null) }
+    var currentUserRole by rememberSaveable { mutableStateOf<UserRole?>(null) }
+
+    var showProfileDialog by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
+
+    var users by remember { mutableStateOf(listOf(
+        AppUser(uid = "admin-uid", username = "Mosa", role = UserRole.ADMIN)
+        // seed the super user (you)
+    )) }
+
+// Firebase login confirmation (fires exactly once after sign-in)
+    val firebaseUser by UserManager.currentUser.collectAsState()
+    var authToastShown by rememberSaveable { mutableStateOf(false) }
+
+    val context = LocalContext.current
+
+// Single instance of the local user repository for this navigator
+    val userRepo: UserRepository = remember {
+        val db = AppDb.getInstance(context)
+        LocalUserRepository(db.userDao())
+    }
+
+    LaunchedEffect(firebaseUser) {
+        Log.d(
+            "Auth",
+            "firebaseUser update -> uid=${firebaseUser?.uid}, name=${firebaseUser?.displayName}, email=${firebaseUser?.email}"
+        )
+        if (firebaseUser != null && !authToastShown) {
+            val who = firebaseUser?.displayName ?: firebaseUser?.email ?: "Google user"
+            Toast.makeText(context, "✅ Signed in as $who", Toast.LENGTH_SHORT).show()
+            authToastShown = true
+        }
+    }
+
+
+    LaunchedEffect(Unit) {
+        // make sure we have at least one admin account
+        userRepo.ensureAdminSeeded()
+    }
+
 
 
     val onCameraControlReady: (CameraControl) -> Unit = { control ->
         cameraControl = control
+        cameraControlState.value = control
     }
 
 
 
     val activity = LocalContext.current as? MainActivity
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    val onDuplicateScanned: (String) -> Unit = { /* no-op or logging */ }
 
-    var scannedBarcode by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+
+    // DataStore for user persistence
+    val userStore = remember { UserDataStore(context) }
+
+// Observe the saved user (null if nothing saved yet)
+    val savedUserState = userStore.userFlow.collectAsState(initial = null)
+
+    LaunchedEffect(savedUserState.value) {
+        val fromDisk = savedUserState.value
+        if (fromDisk != null) {
+            currentUser = fromDisk
+            currentUserRole = fromDisk.role
+            setCurrentScreen(Routes.POS_MENU)
+        } else {
+            setCurrentScreen(Routes.LOGIN)
+        }
+    }
+
+
+      var scannedBarcode by remember { mutableStateOf<String?>(null) }
     var showProductDialog by remember { mutableStateOf(false) }
     var predictedLabel by remember { mutableStateOf<String?>(null) }
     var scannerActive by remember { mutableStateOf(true) }
     //var previewView by remember { mutableStateOf<PreviewView?>(null) }
 
 
+// Your existing currentUser state (you already have this):
+// var currentUser by remember { mutableStateOf(AppUser(username = "Mosa", role = UserRole.ADMIN)) }
+
+    LaunchedEffect(savedUserState.value) {
+        savedUserState.value?.let { fromDisk ->
+            // populate on launch if a user was saved previously
+            currentUser = fromDisk
+        }
+    }
+
+    // Helper to persist any time you change the user
+    fun persistCurrentUser() {
+        val u = currentUser ?: return
+        coroutineScope.launch { userStore.saveUser(u) }
+    }
+
+    LaunchedEffect(currentUser) {
+        currentUser?.let {
+            Log.d("User", "Persisting AppUser: ${it.username} (${it.role})")
+            userStore.saveUser(it)
+        }
+    }
+
+
+
 
     LaunchedEffect(Unit) {
         productList = loadProductListFromGoogleSheets(context).toMutableList()
     }
+
 
 
     Scaffold(
@@ -970,8 +1580,6 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
 
     LaunchedEffect(Unit) {
         delay(timeMillis = 4000)
-        currentScreen = "MainMenu"
-
 
         val fetchedProducts = readProductsFromGoogleSheets(service)
         sheetProducts = fetchedProducts
@@ -989,7 +1597,7 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
     if (goToImageCapture) {
         goToImageCapture = false
         imageCaptureSessionId += 1  // 🚀 force refresh
-        currentScreen = "ImageCapture"
+        setCurrentScreen("ImageCapture")
     }
 
 
@@ -1013,7 +1621,7 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "📸 Please hold the product front-facing the camera...",
+                    text = "📸 Please hold the product   ront-facing the camera...",
                     color = Color.White,
                     fontSize = 20.sp,
                     textAlign = TextAlign.Center
@@ -1021,10 +1629,9 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
             }
 
 
-
             LaunchedEffect(imageCaptureSessionId) {
                 delay(4000)
-                currentScreen = "CaptureAndProcess"
+                setCurrentScreen("CaptureAndProcess")
             }
 
         }
@@ -1099,14 +1706,14 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
 
 
                         showProductDialog = true
-                        currentScreen = if (scannerSource == "Sales") "Scanner" else "InventoryScanner"
+                        setCurrentScreen(if (scannerSource == "Sales") "Scanner" else "InventoryScanner")
                     }
 
 
                 }
 ,
                 onBack = {
-                    currentScreen = if (scannerSource == "Sales") "Scanner" else "InventoryScanner"
+                    setCurrentScreen(if (scannerSource == "Sales") "Scanner" else "InventoryScanner")
                 }
             )
         }
@@ -1114,14 +1721,32 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
 
         "Greeting" -> GreetingScreen()
 
-        "MainMenu" -> MainMenuScreen(
-            onGoogleSignIn = {
-                activity?.initializeGoogleSignIn()
-                currentScreen = "PosMenu"
-            },
-            coroutineScope = coroutineScope,
-            onExitApp = onExitApp,
-        )
+        "MainMenu" -> {
+            MainMenuScreen(
+                onGoogleSignIn = {
+                    if (UserManager.currentUser.value == null) {
+                        Log.d("Auth", "GoogleSignIn requested from menu")
+                        activity?.initializeGoogleSignIn()
+                    } else {
+                        Toast.makeText(context, "Already signed in", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                coroutineScope = coroutineScope,
+                onExitApp = onExitApp,
+
+                // NEW: wire these to your screen
+                onOpenSettings = { setCurrentScreen("Settings") },
+                onOpenProfile  = { setCurrentScreen("Profile") },
+
+                // pass the nullable state
+                user = currentUser,
+                userRole = currentUserRole,
+
+                // top-right avatar chip -> Profile
+                onAvatarClick = { setCurrentScreen(Routes.SETTINGS) }
+            )
+        }
+
 
         "PosMenu" -> PosMenuScreen(
             onSalesAndTransactions = {
@@ -1132,7 +1757,7 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
                     amountTendered = ""
                     change = 0.00
 
-                    currentScreen = "Sales"
+                    setCurrentScreen("Sales")
                 } else {
                     activity?.requestCameraPermission()
                 }
@@ -1140,16 +1765,24 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
             onInventoryManagement = {
                 if (activity?.hasCameraPermission(context) == true) {
                     scannerSource = "Inventory"
-                    currentScreen = "InventoryScanner"
+                    setCurrentScreen("InventoryScanner")
                 } else {
                     activity?.requestCameraPermission()
                 }
             },
             onViewSales = {
-                currentScreen = "ViewSales"
+                setCurrentScreen("ViewSales")
             },
+
+            // 👇 NEW LINES — these wire your buttons
+            onOpenProfile  = { setCurrentScreen("Profile") },
+            onOpenSettings = { setCurrentScreen("Settings") },
+            userRole = currentUserRole,
+            user                    = currentUser,             // 👈 NEW
+            onAvatarClick           = { setCurrentScreen("Profile") }, // 👈 NEW
             onExitApp = onExitApp
         )
+
 
         "Scanner" -> {
             activity?.checkAndRequestCameraPermission()
@@ -1191,7 +1824,7 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
                     Toast.makeText(context, "📦 Already scanned: $barcode", Toast.LENGTH_SHORT).show()
                 },
                 onBack = {
-                    currentScreen = "PosMenu"
+                    setCurrentScreen("PosMenu")
                 },
                 productList = productList,
                 setDuplicateProduct = { duplicateProduct = it },
@@ -1206,6 +1839,7 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
                 showProductDialog = showProductDialog,
                 snackbarHostState = snackbarHostState,  // 👈 Add this line
                 coroutineScope = coroutineScope,        // 👈 And this line too
+                cameraControl = cameraControlState.value,
                 onCameraControlReady = onCameraControlReady
                 )
 
@@ -1218,55 +1852,20 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
         "Sales" -> {
             Scaffold(
                 topBar = {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(65.dp)
-                            .background(Color(0xFF37474F)), // Teal color
-                        contentAlignment = Alignment.Center
-                    ) {
-                        // Left-side icons (Back & Cart)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Start,
-                            modifier = Modifier
-                                .align(Alignment.CenterStart)
-                                .padding(start = 8.dp)
-                        ) {
-                            IconButton(onClick = { currentScreen = "PosMenu" }) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = Color.White
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(8.dp))
-
+                    TuckshopTopBar(
+                        title = "Sales Screen",
+                        showBack = true,
+                        onBack = { setCurrentScreen("PosMenu") },
+                        onSwitchAccount = { launchAccountChooser() },
+                        onTakeProfilePhoto = { setCurrentScreen(Routes.CAPTURE_SELFIE) }
+                        ,
+                        onSignOut = {
+                            UserManager.signOut()
+                            // Optionally re-run chooser immediately:
+                            // launchAccountChooser()
                         }
 
-                        // Center-aligned credit card icon + text
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.align(Alignment.Center)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CreditCard, // Add this import if missing
-                                contentDescription = "Credit Card",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-
-                            Spacer(modifier = Modifier.width(8.dp))
-
-                            Text(
-                                text = "Sales Screen",
-                                color = Color.White,
-                                style = MaterialTheme.typography.titleLarge
-                            )
-                        }
-                    }
+                    )
                 }
 
 
@@ -1320,83 +1919,376 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
                         amountTendered = ""
                         change = 0.00
                     },
+                    cameraControl = cameraControlState.value,
                     onCameraControlReady = { control: CameraControl ->
-                        cameraControl = control
-                    }
+                        Log.d("FLASH", "📥 Received camera control in SalesScreen")
+                        cameraControlState.value = control
+                        Log.d("FLASH", "📦 Passing cameraControl to SalesScreen: ${cameraControlState.value != null}")
+                    },
+                            setCurrentScreen = setCurrentScreen,
+                    scannerSource = "Sales"
+
 
                    )
 
+                LaunchedEffect(cameraControlState.value) {
+                    delay(2000)
+                    Log.d("FLASH", "🕒 Final cameraControl after 2s: ${cameraControl != null}")
+                    Log.d("FLASH", "🕒 Final cameraControlstate after 2s: ${cameraControlState.value != null}")
+                }
+
+
             }
+            if (showProfileDialog) {
+                ProfilePhotoDialog(
+                    onDismiss = { showProfileDialog = false },
+                    onBitmapReady = { bmp ->
+                        val uidForSave = UserManager.currentUser.value?.uid
+                            ?: "Local:${currentUser?.username ?: "unknown"}"
+
+                        coroutineScope.launch {
+                            val ok = UserManager.updatePhoto(ctx, uidForSave, bmp)
+                            if (ok) {
+                                // read the saved path and refresh UI + Room
+                                val path = ProfileStore.getPhotoPath(ctx, uidForSave)
+                                if (!path.isNullOrBlank()) {
+                                    currentUser = currentUser?.copy(photoPath = path)
+                                    currentUser?.let { userRepo.updatePhoto(it.username, path) }
+                                }
+                                Toast.makeText(ctx, "Profile photo updated", Toast.LENGTH_SHORT).show()
+                                setCurrentScreen(Routes.SETTINGS)
+                            } else {
+                                Toast.makeText(ctx, "Couldn't update profile photo", Toast.LENGTH_SHORT).show()
+                            }
+                            showProfileDialog = false
+                        }
+                    }
+                )
+            }
+
         }
 
+
+
         "ViewSales" -> {
-            ViewSalesScreen(
-                productList = productList,
-                onBack = {
-                    currentScreen = "PosMenu"
+            Scaffold(
+                topBar = {
+                    TuckshopTopBar(
+                        title = "View Sales",
+                        showBack = true,
+                        onBack = { setCurrentScreen("PosMenu") },
+                        onAvatarClick = { setCurrentScreen(Routes.SETTINGS) },
+                    )
                 }
-            )
+            ) { innerPadding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)   // 👈 consume the Scaffold’s padding
+                ) {
+                    ViewSalesScreen(
+                        productList = productList,
+                        onBack = { setCurrentScreen("PosMenu")}
+                    )
+                }
+            }
         }
 
 
         "InventoryScanner" -> {
             activity?.checkAndRequestCameraPermission()
-            BarcodeScannerView(scannedItems = productList.map { ProductItem(it.barcode) },
-                onBarcodeScanned = { barcode: String ->
-                    // ✅ Play beep sound
-                    try {
-                        val afd = context.resources.openRawResourceFd(R.raw.beepsound)
-                        val player = MediaPlayer()
-                        player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-                        afd.close()
-                        player.prepare()
-                        player.start()
-                    } catch (e: Exception) {
-                        Log.e("Sound", "Error playing beep sound: ${e.message}")
-                    }
 
-                    // ✅ Check if barcode already exists in productList
-                    val alreadyScanned = productList.any { it.barcode == barcode }
+            Scaffold(
+                topBar = {
+                    TuckshopTopBar(
+                        title = "Inventory",
+                        showBack = true,
+                        onBack = { setCurrentScreen("PosMenu") },
+                        onAvatarClick = { setCurrentScreen(Routes.SETTINGS) },
 
-                    if (alreadyScanned) {
-                        // ⚠️ Duplicate found - show toast
-                        Toast.makeText(context, "📦 Item already scanned: $barcode", Toast.LENGTH_SHORT).show()
-                        // NEW CODE HERE
-                        duplicateProduct = productList.find { it.barcode == barcode }
-                        showQuantityDialog = true
-                        quantityInput = duplicateProduct?.quantity?.toString() ?: ""
+                    )
+                }
+            ) { innerPadding ->
 
-                    } else {
-                        // 🆕 New item - go to image capture
-                        scannedBarcode = barcode
-                        currentScreen = "ImageCapture"
-                    }
-                },    onDuplicateScanned = { barcode ->
-                    Toast.makeText(context, "📦 Already scanned: $barcode", Toast.LENGTH_SHORT).show()
-                },
-                onBack = {
-                    currentScreen = "PosMenu"
-                },
-                productList = productList,
-                setDuplicateProduct = { duplicateProduct = it },
-                setShowQuantityDialog = { showQuantityDialog = it },
-                setScannerActive = { scannerActive = it },
-                setMatchedProduct = { matchedProduct = it },
-                setShowSimilarProductDialog = { showSimilarProductDialog = it },
-                scannerActive = scannerActive,
-                showQuantityDialog = showQuantityDialog,
-                showSimilarProductDialog = showSimilarProductDialog,
-                showSmartPrefillDialog = showSmartPrefillDialog,
-                showProductDialog = showProductDialog,
-                snackbarHostState = snackbarHostState,  // 👈 Add this line
-                coroutineScope = coroutineScope,
-                onCameraControlReady = onCameraControlReady// 👈 And this line too
-                )
+                // Apply the scaffold padding to your screen content:
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                ) {
+                    BarcodeScannerView(
+                        scannedItems = productList.map { ProductItem(it.barcode) },
+
+                        onBarcodeScanned = { barcode: String ->
+                            // ✅ Play beep sound
+                            try {
+                                val afd = context.resources.openRawResourceFd(R.raw.beepsound)
+                                val player = MediaPlayer()
+                                player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                                afd.close()
+                                player.prepare()
+                                player.start()
+                            } catch (e: Exception) {
+                                Log.e("Sound", "Error playing beep sound: ${e.message}")
+                            }
+
+                            val alreadyScanned = productList.any { it.barcode == barcode }
+                            if (alreadyScanned) {
+                                Toast.makeText(context, "📦 Item already scanned: $barcode", Toast.LENGTH_SHORT).show()
+                                duplicateProduct = productList.find { it.barcode == barcode }
+                                showQuantityDialog = true
+                                quantityInput = duplicateProduct?.quantity?.toString() ?: ""
+                            } else {
+                                scannedBarcode = barcode
+                                setCurrentScreen("ImageCapture")
+                            }
+                        },
+
+                        onDuplicateScanned = { barcode ->
+                            Toast.makeText(context, "📦 Already scanned: $barcode", Toast.LENGTH_SHORT).show()
+                        },
+                        onBack = { setCurrentScreen("PosMenu") },
+
+                        productList = productList,
+                        setDuplicateProduct = { duplicateProduct = it },
+                        setShowQuantityDialog = { showQuantityDialog = it },
+                        setScannerActive = { scannerActive = it },
+                        setMatchedProduct = { matchedProduct = it },
+                        setShowSimilarProductDialog = { showSimilarProductDialog = it },
+
+                        scannerActive = scannerActive,
+                        showQuantityDialog = showQuantityDialog,
+                        showSimilarProductDialog = showSimilarProductDialog,
+                        showSmartPrefillDialog = showSmartPrefillDialog,
+                        showProductDialog = showProductDialog,
+
+                        snackbarHostState = snackbarHostState,
+                        coroutineScope = coroutineScope,
+
+                        cameraControl = cameraControlState.value,
+                        onCameraControlReady = onCameraControlReady
+                    )
+                }
+            }
         }
 
 
-        "Settings" -> SettingsScreen()
-        "Profile" -> ProfileScreen()
+
+
+        "Settings" -> SettingsScreen(
+            onBack = { setCurrentScreen("PosMenu") },
+
+            onAddUser = {
+                // next step we'll open an "AddUserDialog"
+                setCurrentScreen( "AddUser")   // temporary navigation placeholder
+            },
+            onManageUsers = {
+                setCurrentScreen("ManageUsers")
+            },
+            onChangePin = {
+                setCurrentScreen("ChangePin")
+            },
+            onCaptureProfilePhoto = {
+                setCurrentScreen("CaptureSelfie")
+            },
+            onLogout = {
+                Firebase.auth.signOut()               // Google/Firebase out
+                setCurrentUser(null)                  // App user out
+                currentUserRole = null
+                coroutineScope.launch { userStore.clearUser() }
+                setCurrentScreen(Routes.LOGIN)
+            },
+            user = currentUser      // 👈 pass user
+        )
+
+        "Profile" -> ProfileScreen(
+            onBack = { setCurrentScreen(Routes.POS_MENU) },
+            user = currentUser,
+                        onSwitchUser = {
+                currentUser = null
+                currentUserRole = null
+                coroutineScope.launch { userStore.clearUser() }
+                            setCurrentScreen(Routes.LOGIN)
+            },
+            onAvatarClick = { setCurrentScreen(Routes.SETTINGS) },
+            onTakeProfilePhoto = { setCurrentScreen(Routes.CAPTURE_SELFIE) }
+        )
+
+
+
+       // "AddUser"      -> PlaceholderScreen("Add User",      onBack = { setCurrentScreen( "Settings") })
+        "ChangePin"    -> PlaceholderScreen("Change My PIN", onBack = { setCurrentScreen( "Settings") })
+
+// MainActivity.kt  (inside AppNavigator when route == Routes.CAPTURE_SELFIE)
+// -----------------------------------------
+// AppNavigator()  ->  case Routes.CAPTURE_SELFIE
+// -----------------------------------------
+        Routes.CAPTURE_SELFIE -> {
+            val ctx = LocalContext.current
+            var showProfileDialog by rememberSaveable { mutableStateOf(true) } // auto-open when entering
+
+            Scaffold(
+                topBar = {
+                    TuckshopTopBar(
+                        title = "Capture Profile Photo",
+                        showBack = true,
+                        onBack = { setCurrentScreen(Routes.SETTINGS) },
+                        onTakeProfilePhoto = { showProfileDialog = true },
+                        onSignOut = {},
+                        onSwitchAccount = {},
+                        onAvatarClick = {}
+                    )
+                }
+            ) { innerPadding ->
+                // Blank body – we only need the dialog
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                )
+            }
+
+            if (showProfileDialog) {
+                ProfilePhotoDialog(
+                    onDismiss = { showProfileDialog = false },
+                    onBitmapReady = { bmp ->
+                        val uidForSave: String =
+                            UserManager.currentUser.value?.uid
+                                ?: "Local:${currentUser?.username ?: "unknown"}"
+
+                        coroutineScope.launch {
+                            val ok: Boolean = UserManager.updatePhoto(ctx, uidForSave, bmp)
+                            if (ok) {
+                                // Read the just-saved path from DataStore and refresh UI + Room
+                                val path: String? = ProfileStore.getPhotoPath(ctx, uidForSave)
+                                if (path != null) {
+                                    // 1) update in-memory so chip/topbar refreshes
+                                    currentUser = currentUser?.copy(photoPath = path)
+                                    // 2) persist in Room
+                                    currentUser?.let { userRepo.updatePhoto(it.username, path) }
+                                }
+
+                                Toast.makeText(ctx, "Profile photo updated", Toast.LENGTH_SHORT).show()
+                                // navigate back to Settings
+                                setCurrentScreen(Routes.SETTINGS)
+                            } else {
+                                Toast.makeText(ctx, "Couldn't update profile photo", Toast.LENGTH_SHORT).show()
+                            }
+
+                            showProfileDialog = false
+                        }
+                    }
+                )
+            }
+        }
+
+
+
+
+
+
+
+
+
+        Routes.MANAGE_USERS -> {
+            if (currentUserRole == UserRole.ADMIN) {
+                    ManageUsersScreen(
+                    userRepo = userRepo,
+                    onBack = { setCurrentScreen(Routes.SETTINGS) },
+                    onAvatarClick = { setCurrentScreen(Routes.SETTINGS) }
+                )
+            } else {
+                Toast.makeText(context, "Admins only", Toast.LENGTH_SHORT).show()
+                setCurrentScreen(Routes.SETTINGS)
+            }
+        }
+
+
+        Routes.LOGIN -> {
+            val activity: MainActivity? = LocalContext.current as? MainActivity
+            val ctx: Context = LocalContext.current
+            val googleSignInStarted = rememberSaveable { mutableStateOf(false) }
+
+            LoginScreen(
+                userRepo = userRepo,
+                onLoggedIn = { u: AppUser ->
+                    setCurrentUser(u)
+
+                    // 2) persist top bar + profile screen
+                    coroutineScope.launch {
+                        ProfileStore.saveActive(
+                            ctx = ctx,
+                            name = u.username,
+                            role = u.role.name,
+                            photoPath = u.photoPath
+                        )
+                    }
+
+                    // 3) (Optional) start Google sign-in once if Firebase user is null
+                    if (UserManager.currentUser.value == null && !googleSignInStarted.value) {
+                        googleSignInStarted.value = true
+                        Log.d("Auth", "Triggering Google sign-in after App login")
+                        activity?.initializeGoogleSignIn()
+                    }
+
+                    // 4) go to POS menu
+                    setCurrentScreen(Routes.POS_MENU)
+                },
+                onBack = {
+                    // From Login screen: exit the app
+                    activity?.finish()
+                }
+            )
+        }
+
+
+
+// SETTINGS route
+        Routes.SETTINGS -> {
+            SettingsScreen(
+                onBack = { setCurrentScreen(Routes.POS_MENU) },
+                onAddUser = { setCurrentScreen(Routes.ADD_USER) },
+                onManageUsers = { setCurrentScreen(Routes.MANAGE_USERS) },
+                onChangePin = { /* later */ },
+                onCaptureProfilePhoto = { setCurrentScreen(Routes.CAPTURE_SELFIE) },
+                onLogout = {
+                    Firebase.auth.signOut()               // Google/Firebase out
+                    setCurrentUser(null)                  // App user out
+                    currentUserRole = null
+                    coroutineScope.launch { userStore.clearUser() }
+                    setCurrentScreen(Routes.LOGIN)
+                }
+                ,
+                user = currentUser,
+                onAvatarClick = { setCurrentScreen(Routes.SETTINGS) }
+            )
+        }
+
+
+// PROFILE route
+        Routes.PROFILE -> {
+            ProfileScreen(
+                onBack = { setCurrentScreen(Routes.POS_MENU) },
+                user = currentUser,                               // ← nullable is fine
+                onSwitchUser = {
+                    currentUser = null
+                    currentUserRole = null
+                    coroutineScope.launch { userStore.clearUser() }
+                    setCurrentScreen(Routes.LOGIN)
+                },
+                onAvatarClick = { setCurrentScreen( Routes.SETTINGS) },
+                onTakeProfilePhoto = { setCurrentScreen(Routes.CAPTURE_SELFIE) }
+            )
+        }
+
+        Routes.ADD_USER -> {
+            AddUserScreen(
+                userRepo = userRepo,
+                onBack = { setCurrentScreen(Routes.SETTINGS) }
+            )
+        }
+
+
     }
 
     // 🧾 Product Entry Dialog
@@ -1444,12 +2336,12 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
                 predictedLabel = null
                 scannedBarcode = null
                 showProductDialog = false
-                currentScreen = "PosMenu"
+                setCurrentScreen("PosMenu")
                 scannerActive = true
-                currentScreen = "Refreshing"
+                setCurrentScreen("Refreshing")
                 coroutineScope.launch {
                     delay(100)
-                    currentScreen = if (scannerSource == "Sales") "Scanner" else "InventoryScanner"
+                    setCurrentScreen(if (scannerSource == "Sales") "Scanner" else "InventoryScanner")
                 }
 
             },
@@ -1462,10 +2354,10 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
                 predictedLabel = null
                 scannerActive = true
                 // 👇 Force a refresh of the scanner
-                currentScreen = "Refreshing"
+                setCurrentScreen("Refreshing")
                 coroutineScope.launch {
                     delay(100) // short delay before going back to scanner
-                    currentScreen = if (scannerSource == "Sales") "Scanner" else "InventoryScanner"
+                    setCurrentScreen(if (scannerSource == "Sales") "Scanner" else "InventoryScanner")
                 }
             }
         )
@@ -1515,7 +2407,7 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
                 predictedLabel = null
                 scannerActive = true
                 duplicateProduct = null
-                currentScreen = if (scannerSource == "Sales") "Scanner" else "InventoryScanner"
+                setCurrentScreen(if (scannerSource == "Sales") "Scanner" else "InventoryScanner")
             },
             onDismiss = {
                 Log.w("QuantityInputDialog", "🛑 Dialog dismissed. No changes made.")
@@ -1524,10 +2416,10 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
                 scannedBarcode = null
                 predictedLabel = null
                 duplicateProduct = null
-                currentScreen = "Refreshing"
+                setCurrentScreen("Refreshing")
                 coroutineScope.launch {
                     delay(100)
-                    currentScreen = if (scannerSource == "Sales") "Scanner" else "InventoryScanner"
+                    setCurrentScreen(if (scannerSource == "Sales") "Scanner" else "InventoryScanner")
                 }
             }
         )
@@ -1541,21 +2433,21 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
                 prefillProduct = matchedProduct
                 showSmartPrefillDialog = true
                 matchedProduct = null
-                currentScreen = "Refreshing" // 👈 force screen refresh
+                setCurrentScreen("Refreshing") // 👈 force screen refresh
                 coroutineScope.launch {
                     delay(100)
-                    currentScreen = "ImageCapture"
+                    setCurrentScreen("ImageCapture")
                 }
             },
             onDismiss = {
                 showSimilarProductDialog = false
                 matchedProduct = null
-                currentScreen = "Refreshing"
+                setCurrentScreen("Refreshing")
                 goToImageCapture = true
                 scannerActive = true
                 coroutineScope.launch {
                     delay(100)
-                    currentScreen = if (scannerSource == "Sales") "Scanner" else "InventoryScanner"
+                    setCurrentScreen(if (scannerSource == "Sales") "Scanner" else "InventoryScanner")
                 }
             }
         )
@@ -1593,11 +2485,11 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
                 // 🔁 Reset and return to scanner
                 showSmartPrefillDialog = false
                 prefillProduct = null
-                currentScreen = "Refreshing"
+                setCurrentScreen("Refreshing")
                 coroutineScope.launch {
                     delay(100)
                     scannerActive = true // ✅ 🔥 The missing key to revive scanning!
-                    currentScreen = if (scannerSource == "Sales") "Scanner" else "InventoryScanner"
+                    setCurrentScreen(if (scannerSource == "Sales") "Scanner" else "InventoryScanner")
                 }
             },
 
@@ -1605,13 +2497,328 @@ fun AppNavigator(service: Sheets, onExitApp: () -> Unit) {
                 showSmartPrefillDialog = false
                 prefillProduct = null
                 scannerActive = true
-                currentScreen = if (scannerSource == "Sales") "Scanner" else "InventoryScanner"
+                setCurrentScreen(if (scannerSource == "Sales") "Scanner" else "InventoryScanner")
             }
         )
     }
 
 
+
 }
+
+
+@Composable
+fun ManageUsersScreen(
+    userRepo: UserRepository,
+    onBack: () -> Unit,
+    onAvatarClick: () -> Unit
+) {
+    var showAddDialog by remember { mutableStateOf(false) }
+    var users by remember { mutableStateOf(listOf<UserEntity>()) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // Load once
+    LaunchedEffect(Unit) {
+        users = userRepo.list()
+    }
+
+    fun refresh() {
+        scope.launch { users = userRepo.list() }
+    }
+
+    Scaffold(
+        topBar = {
+            TuckshopTopBar(
+                title = "Manage Users",
+                showBack = true,
+                onBack = onBack,
+                onAvatarClick = onAvatarClick,
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showAddDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Add")
+            }
+        }
+    ) { inner ->
+        Box(Modifier.padding(inner)) {
+            if (users.isEmpty()) {
+                Text(
+                    "No users yet. Tap + to add one.",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    textAlign = TextAlign.Center
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(users, key = { it.username }) { u ->
+                        UserRow(
+                            user = u,
+                            onToggleRole = {
+                                scope.launch {
+                                    val newRole =
+                                        if (u.role == UserRole.ADMIN.name)
+                                            UserRole.CASHIER
+                                        else
+                                            UserRole.ADMIN
+                                    userRepo.changeRole(u.username, newRole)
+                                    Toast.makeText(context, "Role updated", Toast.LENGTH_SHORT).show()
+                                    refresh()
+                                }
+                            },
+                            onResetPin = { newPin ->
+                                scope.launch {
+                                    userRepo.resetPin(u.username, newPin)
+                                    Toast.makeText(context, "PIN reset", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onDelete = {
+                                scope.launch {
+                                    userRepo.delete(u.username)
+                                    Toast.makeText(context, "User deleted", Toast.LENGTH_SHORT).show()
+                                    refresh()
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun UserRow(
+    user: UserEntity,
+    onToggleRole: () -> Unit,
+    onResetPin: (newPin: String) -> Unit,
+    onDelete: () -> Unit
+) {
+    var showResetDialog by remember { mutableStateOf(false) }
+    var newPin by remember { mutableStateOf("") }
+
+    Card(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(user.username, style = typography.titleMedium)
+                Text(user.role, style = typography.bodyMedium)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onToggleRole) { Text("Toggle Role") }
+                TextButton(onClick = { showResetDialog = true }) { Text("Reset PIN") }
+                TextButton(onClick = onDelete) { Text("Delete") }
+            }
+        }
+    }
+
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val ok = newPin.length in 4..8 && newPin.all { it.isDigit() }
+                        if (ok) { onResetPin(newPin); showResetDialog = false }
+                    }
+                ) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { showResetDialog = false }) { Text("Cancel") } },
+            title = { Text("Reset PIN") },
+            text = {
+                OutlinedTextField(
+                    value = newPin,
+                    onValueChange = { if (it.length <= 8) newPin = it.filter(Char::isDigit) },
+                    label = { Text("New PIN (4–8 digits)") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+                )
+            }
+        )
+    }
+}
+
+
+@Composable
+fun AddUserDialog(
+    show: Boolean,
+    onDismiss: () -> Unit,
+    onSubmit: (username: String, pin: String, role: UserRole) -> Unit
+) {
+    if (!show) return
+
+    var username by remember { mutableStateOf("") }
+    var pin by remember { mutableStateOf("") }
+    var role by remember { mutableStateOf(UserRole.CASHIER) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val valid = username.isNotBlank() && pin.length in 4..8 && pin.all { it.isDigit() }
+                    if (valid) onSubmit(username.trim(), pin, role)
+                }
+            ) { Text("Add") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        title = { Text("Add User") },
+        text = {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text("Username") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { if (it.length <= 8) pin = it.filter(Char::isDigit) },
+                    label = { Text("PIN (4–8 digits)") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Role: ")
+                    Spacer(Modifier.width(8.dp))
+                    DropdownMenuBox(
+                        current = role.name,
+                        options = listOf(UserRole.CASHIER.name, UserRole.ADMIN.name),
+                        onSelect = { sel -> role = UserRole.valueOf(sel) }
+                    )
+                }
+            }
+        }
+    )
+}
+
+/** Tiny helper for a simple dropdown; reuse if you already have one */
+@Composable
+private fun DropdownMenuBox(
+    current: String,
+    options: List<String>,
+    onSelect: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { expanded = true }) { Text(current) }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { opt ->
+                DropdownMenuItem(
+                    text = { Text(opt) },
+                    onClick = { expanded = false; onSelect(opt) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun LoginScreen(
+    userRepo: UserRepository,
+    onLoggedIn: (AppUser) -> Unit,
+    onBack: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var username by remember { mutableStateOf("") }
+    var pin by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        // make sure an admin exists the very first time the app runs
+        userRepo.ensureAdminSeeded()
+    }
+
+    Scaffold(
+        topBar = {
+            TuckshopTopBar(
+                title = "Login",
+                showBack = true,
+                onBack = onBack,
+                onAvatarClick = { /* maybe open a profile/settings sheet later */ },
+
+            )
+        }
+    ) { inner ->
+        Column(
+            modifier = Modifier
+                .padding(inner)
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            OutlinedTextField(
+                value = username,
+                onValueChange = { username = it },
+                label = { Text("Username") },
+                singleLine = true,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = pin,
+                onValueChange = { pin = it },
+                label = { Text("PIN") },
+                singleLine = true,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                visualTransformation = PasswordVisualTransformation()
+            )
+
+            if (error != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(text = error!!, color = MaterialTheme.colorScheme.error)
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Button(
+                onClick = {
+                    scope.launch {
+                        error = null
+                        busy = true
+                        val u = userRepo.verify(username.trim(), pin.trim())
+                        busy = false
+                        if (u != null) {
+                            Toast.makeText(context, "Welcome ${u.username}", Toast.LENGTH_SHORT).show()
+                            onLoggedIn(u)
+                        } else {
+                            error = "Invalid username or PIN"
+                            Toast.makeText(context, "Login failed", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                enabled = !busy && username.isNotBlank() && pin.length >= 4,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (busy) "Signing in…" else "Sign in")
+            }
+        }
+    }
+}
+
 
 @Composable
 fun ViewSalesScreen(
@@ -1649,7 +2856,7 @@ fun ViewSalesScreen(
             Text(
                 text = "View Sales Products",
                 color = Color.White,
-                style = MaterialTheme.typography.titleLarge
+                style = typography.titleLarge
             )
         }
 
@@ -1705,7 +2912,7 @@ fun ViewSalesScreen(
                     ) {
                         Text(
                             text = product.name,
-                            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp),
+                            style = typography.bodyLarge.copy(fontSize = 18.sp),
                             color = Color.White,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
@@ -1803,6 +3010,18 @@ fun ViewSalesScreen(
     }
 }
 
+@Composable
+fun PlaceholderScreen(title: String, onBack: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().background(Color.Black).padding(16.dp)
+    ) {
+        Button(onClick = onBack) { Text("← Back") }
+        Spacer(Modifier.height(12.dp))
+        Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text("Coming next…", color = Color.White)
+    }
+}
 
 
 @Composable
@@ -2151,6 +3370,197 @@ fun ConfirmSimilarProductDialog(
 
 }
 
+@Composable
+fun ProfileScreen(
+    onBack: () -> Unit,
+    user: AppUser?, // This should already be from UserManager
+    onSwitchUser: () -> Unit,
+    onAvatarClick: () -> Unit,
+    onTakeProfilePhoto: () -> Unit
+) {
+    val ctx = LocalContext.current
+
+    val savedName by ProfileStore.nameFlow(ctx).collectAsState(initial = null)
+    val savedRole by ProfileStore.roleFlow(ctx).collectAsState(initial = null)
+    var photoToShow by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(user?.uid) {
+        if (user?.uid != null) {
+            photoToShow = ProfileStore.getPhotoPath(ctx, user.uid)
+        }
+    }
+
+
+
+    val name = savedName ?: user?.username ?: "—"
+    val role = savedRole ?: user?.role?.name ?: "—"
+
+    Scaffold(
+        topBar = {
+            TuckshopTopBar(
+                title = "Profile",
+                showBack = true,
+                onBack = onBack,
+                onTakeProfilePhoto = onTakeProfilePhoto,
+                onSwitchAccount = onSwitchUser,
+                onSignOut = {},
+                onAvatarClick = onAvatarClick
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (!photoToShow.isNullOrBlank()) {
+                val model = photoToShow
+                Image(
+                    painter = rememberAsyncImagePainter(model),
+                    contentDescription = "Profile photo",
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            Text(text = "Username: $name")
+            Text(text = "Role: $role")
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(onClick = onTakeProfilePhoto) {
+                Text("Update profile photo")
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            var showConfirm by remember { mutableStateOf(false) }
+            Button(onClick = { showConfirm = true }) {
+                Text("Switch user")
+            }
+            if (showConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showConfirm = false },
+                    title = { Text("Switch user?") },
+                    text = { Text("You'll be logged out and returned to the login screen.") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showConfirm = false
+                            onSwitchUser()
+                        }) {
+                            Text("Yes")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showConfirm = false }) {
+                            Text("No")
+                        }
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            var showLogout by remember { mutableStateOf(false) }
+            Button(onClick = { showLogout = true }) {
+                Text("Log out")
+            }
+            if (showLogout) {
+                AlertDialog(
+                    onDismissRequest = { showLogout = false },
+                    title = { Text("Log out?") },
+                    text = { Text("You will be signed out and your profile data will be cleared.") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showLogout = false
+                            // Clear stored profile info
+                            CoroutineScope(Dispatchers.IO).launch {
+                                ProfileStore.saveActive(ctx, "", "", null)
+                                ProfileStore.clearPhoto(ctx)
+                                withContext(Dispatchers.Main) {
+                                    onSwitchUser() // Or replace with onLogout() if you add that
+                                }
+                            }
+                        }) {
+                            Text("Yes")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showLogout = false }) {
+                            Text("No")
+                        }
+                    }
+                )
+            }
+
+
+        }
+    }
+}
+
+
+
+@Composable
+fun UserAvatarChip(
+    user: AppUser,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {}
+) {
+    val ctx = LocalContext.current
+
+    var avatarPath by remember { mutableStateOf<String?>(user.photoPath) }
+    LaunchedEffect(user.uid) {
+        avatarPath = ProfileStore.getPhotoPath(ctx, user.uid) ?: user.photoPath
+    }
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF263238))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .clickable { onClick() },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Circle photo or initials fallback
+        val photoPath = avatarPath
+        if (photoPath != null && File(photoPath).exists()) {
+            val bmp = remember(photoPath) { BitmapFactory.decodeFile(photoPath) }
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = "User photo",
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF455A64)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = (user.username.firstOrNull() ?: '?').uppercaseChar().toString(),
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        Spacer(Modifier.width(8.dp))
+        Text(user.username, color = Color.White, fontSize = 14.sp)
+    }
+}
+
+
 
 
 
@@ -2159,8 +3569,44 @@ fun PosMenuScreen(
     onSalesAndTransactions: () -> Unit,
     onInventoryManagement: () -> Unit,
     onViewSales: () -> Unit,
+    onOpenProfile: () -> Unit,     // already there
+    onOpenSettings: () -> Unit,    // already there
+    userRole: UserRole?,           // <-- make nullable
+    user: AppUser?,                // <-- make nullable
+    onAvatarClick: (() -> Unit)?,  // <-- already nullable in your file; keep it
     onExitApp: () -> Unit
 ) {
+
+// Header row with title (left) + avatar (right)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "Tuckshop POS",
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White
+        )
+
+        Spacer(Modifier.weight(1f))
+
+        // 👇 Clickable avatar – when tapped, go to Profile
+// Header row avatar chip (only show if we have a user AND a click handler)
+        UserAvatarChip(
+            user = user ?: return@Row,          // early skip if null, or:
+            onClick = onAvatarClick ?: {}
+        )
+// If you prefer not to early return, you can wrap it:
+        if (user != null && onAvatarClick != null) {
+            UserAvatarChip(user = user, onClick = onAvatarClick)
+        }
+
+    }
+
+    Spacer(Modifier.height(8.dp))
+
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -2211,6 +3657,31 @@ fun PosMenuScreen(
             ) {
                 Text("View Sales", fontFamily = FontFamily.SansSerif)
             }
+
+            Button(
+                onClick = onOpenProfile,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White,
+                    contentColor = Color.Black
+                )
+            ) {
+                Text("Profile", fontFamily = FontFamily.SansSerif)
+            }
+
+// Role-based Settings / My Account button
+            Button(
+                onClick = onOpenSettings,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White,
+                    contentColor = Color.Black
+                )
+            ) {
+                val buttonLabel = if (userRole == UserRole.ADMIN) "Settings" else "My Account"
+                Text(text = buttonLabel, fontFamily = FontFamily.SansSerif)
+            }
+
 
             Button(
                 onClick = onExitApp,
@@ -2302,9 +3773,21 @@ fun GreetingScreen() {
 
 @OptIn(ExperimentalGetImage::class)
 @Composable
-fun MainMenuScreen(onGoogleSignIn: () -> Unit, coroutineScope: CoroutineScope, onExitApp: () -> Unit) {
-
-    val context = LocalContext.current
+fun MainMenuScreen(
+    onGoogleSignIn: () -> Unit,
+    coroutineScope: CoroutineScope,
+    onExitApp: () -> Unit,
+    // NEW: add these so AppNavigator can wire buttons
+    onOpenSettings: () -> Unit,
+    onOpenProfile: () -> Unit,
+    // NEW: allow nullable values coming from AppNavigator
+    user: AppUser?,
+    userRole: UserRole?,
+    // NEW: optional avatar click for the top bar chip
+    onAvatarClick: (() -> Unit)? = null,
+) {
+    val ctx = LocalContext.current
+    val avatarPath: String? = user?.photoPath   // <-- use AppUser photo
 
     Box(
         modifier = Modifier
@@ -2317,6 +3800,15 @@ fun MainMenuScreen(onGoogleSignIn: () -> Unit, coroutineScope: CoroutineScope, o
             verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Optional top bar (keeps your current look & feel)
+            TuckshopTopBar(
+                title = "POS Menu",
+                showBack = true,
+                onBack = { },
+                onAvatarClick = onAvatarClick ?: {},
+                avatarPath = avatarPath
+            )
+
             Button(
                 onClick = onGoogleSignIn,
                 modifier = Modifier.fillMaxWidth(),
@@ -2324,9 +3816,7 @@ fun MainMenuScreen(onGoogleSignIn: () -> Unit, coroutineScope: CoroutineScope, o
                     containerColor = Color.White,
                     contentColor = Color.Black
                 )
-            ) {
-                Text("Sign in with Google", fontFamily = FontFamily.SansSerif)
-            }
+            ) { Text(text = "Sign in with Google", fontFamily = FontFamily.SansSerif) }
 
             Button(
                 onClick = onExitApp,
@@ -2335,91 +3825,120 @@ fun MainMenuScreen(onGoogleSignIn: () -> Unit, coroutineScope: CoroutineScope, o
                     containerColor = Color.White,
                     contentColor = Color.Black
                 )
-            ) {
-                Text("Exit", fontFamily = FontFamily.SansSerif)
-            }
+            ) { Text(text = "Exit", fontFamily = FontFamily.SansSerif) }
 
             Button(
-                onClick = { /* Navigate to Settings */ },
+                onClick = onOpenSettings,              // ← wire it
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.White,
                     contentColor = Color.Black
                 )
-            ) {
-                Text("Settings", fontFamily = FontFamily.SansSerif)
-            }
+            ) { Text(text = "Settings", fontFamily = FontFamily.SansSerif) }
 
             Button(
-                onClick = { /* Navigate to Profile */ },
+                onClick = onOpenProfile,               // ← wire it
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.White,
                     contentColor = Color.Black
                 )
-            ) {
-                Text("Profile", fontFamily = FontFamily.SansSerif)
-            }
+            ) { Text(text = "Profile", fontFamily = FontFamily.SansSerif) }
 
-            Button(
-                onClick = {
-                    Log.d("GoogleSheets", "🔍 Attempting to get Sheets service...")
-                    val service: Sheets? = (context as? MainActivity)?.getSheetsService(context)
-
-                    if (service == null) {
-                        Log.e("GoogleSheets", "🚨 Sheets service is null. Could not initialize.")
-                    } else {
-                        Log.d("GoogleSheets", "✅ Sheets service retrieved. Attempting write...")
-
-                        val calendar = Calendar.getInstance(
-                            TimeZone.getTimeZone("Africa/Johannesburg"),
-                            Locale("en", "ZA")
-                        )
-                        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale("en", "ZA"))
-                        val timeFormat = SimpleDateFormat("HH:mm:ss", Locale("en", "ZA"))
-
-                        dateFormat.timeZone = TimeZone.getTimeZone("Africa/Johannesburg")
-                        timeFormat.timeZone = TimeZone.getTimeZone("Africa/Johannesburg")
-
-                        val currentDate = dateFormat.format(calendar.time)
-                        val currentTime = timeFormat.format(calendar.time)
-
-                        writeToGoogleSheets(
-                            barcode = "123456789",
-                            name = "Test Product",
-                            price = "20.00",
-                            quantity = 1,
-                            date = currentDate,
-                            time = currentTime,
-                            service = service,
-                            coroutineScope = coroutineScope,
-                            imagePath = null
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = Color.Black
-                )
-            ) {
-                Text("Test Write to Google Sheets", fontFamily = FontFamily.SansSerif)
-            }
+            // Tiny “who is signed in” footer — safe calls, no NPEs
+            val who  = user?.username ?: "Guest"
+            val role = userRole?.name ?: "--"
+            Text(text = "User: $who   |   Role: $role", color = Color.White)
         }
     }
 }
 
 
+
 @Composable
-fun SettingsScreen() {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(text = "Settings", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onAddUser: () -> Unit,
+    onManageUsers: () -> Unit,
+    onChangePin: () -> Unit,
+    onCaptureProfilePhoto: () -> Unit,
+    onLogout: () -> Unit,
+    user: AppUser? = null,
+    onAvatarClick: (() -> Unit)? = null
+) {
+
+    val ctx = LocalContext.current
+    val fbUser by UserManager.currentUser.collectAsState()
+    val savedName by ProfileStore.nameFlow(ctx).collectAsState(initial = null)
+    val savedRole by ProfileStore.roleFlow(ctx).collectAsState(initial = null)
+    val localPhoto by ProfileStore.photoPathFlow(ctx).collectAsState(initial = null)
+
+    val name = fbUser?.displayName ?: savedName ?: fbUser?.email?.substringBefore('@') ?: "User"
+    val role = savedRole ?: "CASHIER"
+    val avatar = localPhoto ?: fbUser?.photoUrl?.toString()
+    val avatarPath: String? = user?.photoPath
+
+    Scaffold(
+        topBar = {
+            TuckshopTopBar(
+                title = "Settings",
+                showBack = true,
+                onBack = onBack,
+                onSwitchAccount = { /* if you want */ },
+                onTakeProfilePhoto = onCaptureProfilePhoto,   // 👈 important
+                onSignOut = onLogout,
+                onAvatarClick = onAvatarClick ?: {},
+                avatarPath = avatarPath
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .padding(innerPadding)        // 👈 use the scaffold padding
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // (Optional) You can remove this Back button since the top bar has one
+            // Button(onClick = onBack) { Text("← Back") }
+
+            Text("Settings", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text("Admin options", color = Color(0xFFB0BEC5))
+
+            Button(
+                onClick = onAddUser,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+            ) { Text("Add User (Admin/Cashier)") }
+
+            Button(
+                onClick = onManageUsers,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+            ) { Text("Manage Users") }
+
+            Button(
+                onClick = onChangePin,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+            ) { Text("Change My PIN") }
+
+            Button(
+                onClick = onCaptureProfilePhoto,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+            ) { Text("Capture Profile Photo") }
+
+            Button(
+                onClick = onLogout,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+            ) { Text("Logout") }
+        }
     }
 }
+
 
 @Composable
 fun ProductEntryDialog(
@@ -2536,7 +4055,7 @@ fun ProductEntryDialog(
 
 
 @Composable
-fun ProfileScreen() {
+fun oldProfileScreen() {
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
@@ -2547,12 +4066,14 @@ fun ProfileScreen() {
 
 }
 
-fun saveImageToInternalStorage(context: Context, bitmap: Bitmap, filename: String): String? {
+fun saveImageToInternalStorage(
+    context: Context,
+    bitmap: Bitmap,
+    filename: String
+): String? {
     return try {
-        val directory = File(context.filesDir, "product_images")
-        if (!directory.exists()) {
-            directory.mkdirs()
-        }
+        val directory = File(context.filesDir, "profile_photos")
+        if (!directory.exists()) directory.mkdirs()
 
         val file = File(directory, "$filename.jpg")
         val stream = FileOutputStream(file)
@@ -2562,10 +4083,11 @@ fun saveImageToInternalStorage(context: Context, bitmap: Bitmap, filename: Strin
 
         file.absolutePath
     } catch (e: Exception) {
-        Log.e("ImageSave", "❌ Error saving image", e)
+        Log.e("ImageSave", "Error saving image", e)
         null
     }
 }
+
 
 @Composable
 fun CameraCaptureScreen(
@@ -2694,6 +4216,7 @@ fun BarcodeScannerView(
     showProductDialog: Boolean,
     snackbarHostState: SnackbarHostState,
     coroutineScope: CoroutineScope,
+    cameraControl: CameraControl?,
     onCameraControlReady: (CameraControl) -> Unit
 
     )
@@ -2868,10 +4391,14 @@ fun BarcodeScannerView(
             preview,
             imageAnalysis
         )
+         Log.d("FLASH", "✅ Passing camera control to parent from BarcodeScannerView")
 
          onCameraControlReady(camera.cameraControl)
         // ✅ Store the camera control for toggling flashlight
         cameraControl = camera.cameraControl
+        // val control = camera.cameraControl
+         //Log.d("FLASH", "✅ Sending CameraControl to parent")
+         //onCameraControlReady(control)
     }
 
 
@@ -3060,7 +4587,10 @@ fun SalesScreen(
     onQuantityChange: (Product, Int) -> Unit,
     onAmountChange: (String) -> Unit,
     onClear: () -> Unit,
-    onCameraControlReady: (CameraControl) -> Unit = {}
+    cameraControl: CameraControl?,
+    onCameraControlReady: (CameraControl) -> Unit = {},
+    setCurrentScreen: (String) -> Unit,
+    scannerSource: String = "Sales"
 ) {
     var lastUpdatedBarcode by remember { mutableStateOf<String?>(null) }
     var barcodeDetectedTime by remember { mutableLongStateOf(0L) }
@@ -3094,7 +4624,7 @@ fun SalesScreen(
     var currentScreen by remember { mutableStateOf("Scanner") }
     var scannerSource by remember { mutableStateOf("Sales") } // or default value
     var isTorchOn by remember { mutableStateOf(false) }
-    var cameraControl: CameraControl? by remember { mutableStateOf(null) }
+
 
 
     val coroutineScope = rememberCoroutineScope()
@@ -3129,6 +4659,16 @@ fun SalesScreen(
             }
         }
     }
+
+    LaunchedEffect(cameraControl) {
+        Log.d("FLASH", "📥 Received cameraControl in SalesScreen: ${cameraControl != null}")
+
+    }
+
+    LaunchedEffect(cameraControl) {
+        Log.d("FLASH", "🧪 cameraControl passed into SalesScreen: ${cameraControl != null}")
+    }
+
 
     LaunchedEffect(Unit) {
         Log.d(
@@ -3291,7 +4831,9 @@ fun SalesScreen(
     }
 
 
-    fun handleScannedBarcode(scannedBarcode: String) {
+    fun handleScannedBarcode(scannedBarcode: String,
+                             setCurrentScreen: (String) -> Unit,   // <-- add this
+                             scannerSource: String ) {
         if (!isProductListLoaded) {
             Log.w("ScannerFlow", "⚠️ Scan ignored — product list not loaded yet!")
             return
@@ -3392,10 +4934,10 @@ fun SalesScreen(
         showProductDialog = true
         scannerActive = false
 
-        currentScreen = "Refreshing"
+        setCurrentScreen("Refreshing")
         coroutineScope.launch {
             delay(100)
-            currentScreen = if (scannerSource == "Sales") "Scanner" else "InventoryScanner"
+            setCurrentScreen(if (scannerSource == "Sales") "Scanner" else "InventoryScanner")
         }
 
     }
@@ -3620,7 +5162,7 @@ fun SalesScreen(
                         // 🔍 Scanner Preview
                         ScannerPreview(
                             onBarcodeDetected = { scannedBarcode ->
-                                handleScannedBarcode(scannedBarcode)
+                                handleScannedBarcode(scannedBarcode, setCurrentScreen, scannerSource)
                                 coroutineScope.launch {
                                     delay(1000)
                                     scannerActive = true
@@ -3629,11 +5171,12 @@ fun SalesScreen(
                             scannerActive = scannerActive,
                             onPauseScanner = { scannerActive = false },
                             onCameraControlReady = { control ->
-                                cameraControl = control
+                                Log.d("FLASH", "📥 Received camera control in SalesScreen")
+                                onCameraControlReady(control)
                             }
                         )
 
-                        // 🔦 Flashlight Toggle Button
+                        // 🔦 Flashlight Toggle Button 1
                         IconButton(
                             onClick = {
                                 isTorchOn = !isTorchOn

@@ -49,6 +49,7 @@
 
         <activity
             android:name="com.example.qrcodescannertuckshop2.MainActivity"
+            android:screenOrientation="landscape"
             android:exported="true"
             android:theme="@style/Theme.QRCodeScannerTuckshop">
         </activity>
